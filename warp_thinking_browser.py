@@ -197,7 +197,7 @@ def get_db():
     return con
 
 
-def load_conversations(limit=50):
+def load_conversations(limit=500):
     con = get_db()
     rows = con.execute("""
         SELECT
@@ -218,7 +218,6 @@ def load_conversations(limit=50):
     result = []
     for cid, ts, fq in rows:
         title = (fq or "").strip().replace("\n", " ")
-        title = (title[:70] + "…") if len(title) > 70 else title
         title = title or "(no queries)"
         result.append({"id": cid, "ts": ts, "title": title})
     return result
@@ -244,19 +243,39 @@ def load_tasks(conversation_id):
 
 # ── Screens ───────────────────────────────────────────────────────────────────
 
+def _term_width():
+    try:
+        return os.get_terminal_size().columns
+    except Exception:
+        return 120
+
+
 def screen_conversations():
     while True:
         header("Conversations")
-        convos = load_conversations(50)
+        convos = load_conversations()
 
         if not convos:
             print(c("  No conversations found in the database.", YELLOW))
             prompt("Press Enter to exit")
             return
 
+        # prefix = "  [XX]  2026-05-07 01:56  " = 26 chars
+        prefix_width = 26
+        title_width = max(40, _term_width() - prefix_width)
+        indent = " " * prefix_width
+
         for i, cv in enumerate(convos):
             ts_short = (cv["ts"] or "")[:16]
-            print(f"  {c(f'[{i:>2}]', BOLD, CYAN)}  {c(ts_short, DIM)}  {cv['title']}")
+            idx_str  = c(f"[{i:>2}]", BOLD, CYAN)
+            ts_str   = c(ts_short, DIM)
+            # Wrap the full title at available width
+            title_lines = textwrap.wrap(cv["title"], width=title_width) or ["(no queries)"]
+            first = title_lines[0]
+            rest  = title_lines[1:]
+            print(f"  {idx_str}  {ts_str}  {first}")
+            for line in rest:
+                print(f"{indent}{line}")
 
         print()
         hr()
