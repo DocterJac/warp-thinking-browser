@@ -223,6 +223,22 @@ def load_conversations(limit=500):
     return result
 
 
+def search_thinking_in_conversation(conversation_id, term):
+    """Return True if any task in this conversation contains term in its thinking text."""
+    con = get_db()
+    rows = con.execute(
+        "SELECT task FROM agent_tasks WHERE conversation_id = ?",
+        (conversation_id,)
+    ).fetchall()
+    con.close()
+    term_lower = term.lower()
+    for (blob,) in rows:
+        for block in extract_thinking(blob):
+            if term_lower in block["thinking"].lower():
+                return True
+    return False
+
+
 def _extract_query_text(raw):
     """Extract the plain question text from ai_queries.input (a JSON blob)."""
     if not raw:
@@ -269,44 +285,93 @@ def _term_width():
 
 
 def screen_conversations():
+    title_filter   = ""   # fast: filters conversation title text
+    thinking_filter = ""  # slow: searches inside thinking blobs
+
     while True:
         header("Conversations")
-        convos = load_conversations()
 
-        if not convos:
-            print(c("  No conversations found in the database.", YELLOW))
-            prompt("Press Enter to exit")
-            return
-
-        # prefix = "  [XX]  2026-05-07 01:56  " = 26 chars
-        prefix_width = 26
-        title_width = max(40, _term_width() - prefix_width)
-        indent = " " * prefix_width
-
-        for i, cv in enumerate(convos):
-            ts_short = (cv["ts"] or "")[:16]
-            idx_str  = c(f"[{i:>2}]", BOLD, CYAN)
-            ts_str   = c(ts_short, DIM)
-            # Wrap the full title at available width
-            title_lines = textwrap.wrap(cv["title"], width=title_width) or ["(no queries)"]
-            first = title_lines[0]
-            rest  = title_lines[1:]
-            print(f"  {idx_str}  {ts_str}  {first}")
-            for line in rest:
-                print(f"{indent}{line}")
-
+        # ── Filter prompt ──────────────────────────────────────────────────
+        print(c("  FILTERS", BOLD))
+        tf_display = c(f'"{title_filter}"', CYAN) if title_filter else c("none", DIM)
+        sk_display = c(f'"{thinking_filter}"', CYAN) if thinking_filter else c("none", DIM)
+        print(f"  [F] Title filter    : {tf_display}")
+        print(f"  [T] Thinking search : {sk_display}")
+        if title_filter or thinking_filter:
+            print(f"  [C] Clear all filters")
         print()
         hr()
-        choice = prompt("Select conversation number, or Q to quit", "[0-N / Q]")
+        print()
 
-        if choice.lower() == "q":
+        # ── Load and filter ────────────────────────────────────────────────
+        all_convos = load_conversations()
+
+        # Stage 1: fast title filter (case-insensitive substring match)
+        if title_filter:
+            term = title_filter.lower()
+            all_convos = [cv for cv in all_convos if term in cv["title"].lower()]
+
+        # Stage 2: slow thinking search (parses blobs — may take a moment)
+        if thinking_filter:
+            print(c("  Searching thinking text…", DIM), end="\r", flush=True)
+            matched = []
+            for cv in all_convos:
+                if search_thinking_in_conversation(cv["id"], thinking_filter):
+                    matched.append(cv)
+            all_convos = matched
+            # clear the searching line
+            print(" " * 40, end="\r")
+
+        convos = all_convos
+
+        if not convos:
+            print(c("  No conversations matched your filters.", YELLOW))
+        else:
+            # prefix = "  [XX]  2026-05-07 01:56  " = 26 chars
+            prefix_width = 26
+            title_width  = max(40, _term_width() - prefix_width)
+            indent       = " " * prefix_width
+
+            for i, cv in enumerate(convos):
+                ts_short = (cv["ts"] or "")[:16]
+                idx_str  = c(f"[{i:>2}]", BOLD, CYAN)
+                ts_str   = c(ts_short, DIM)
+                title_lines = textwrap.wrap(cv["title"], width=title_width) or ["(no queries)"]
+                print(f"  {idx_str}  {ts_str}  {title_lines[0]}")
+                for line in title_lines[1:]:
+                    print(f"{indent}{line}")
+
+        total = len(convos)
+        print()
+        hr()
+        if title_filter or thinking_filter:
+            print(c(f"  {total} conversation(s) matched", DIM))
+        choice = prompt(
+            "Number to open,  F = title filter,  T = thinking search,"
+            + ("  C = clear," if title_filter or thinking_filter else "")
+            + "  Q = quit",
+            "[0-N / F / T / C / Q]"
+        )
+
+        cl = choice.lower()
+        if cl == "q":
             return
-        try:
-            idx = int(choice)
-            if 0 <= idx < len(convos):
-                screen_tasks(convos[idx])
-        except ValueError:
-            pass
+        elif cl == "f":
+            val = prompt("Title filter (Enter to clear)").strip()
+            title_filter = val
+        elif cl == "t":
+            val = prompt("Search thinking text (Enter to clear)").strip()
+            thinking_filter = val
+        elif cl == "c":
+            title_filter = ""
+            thinking_filter = ""
+        else:
+            try:
+                idx = int(choice)
+                if 0 <= idx < len(convos):
+                    screen_tasks(convos[idx])
+            except ValueError:
+                pass
 
 
 def screen_tasks(convo):

@@ -31,7 +31,10 @@ copyable, saveable plain text.
 
 ## What it does
 
-- Lists your recent Warp agent **conversations** by timestamp and first message
+- Lists up to 500 recent Warp agent **conversations** by timestamp and first message
+- **Filter by title** — instantly narrow the list by any word or phrase from your question
+- **Search inside thinking** — scan the full reasoning text across all conversations
+  to find one where the AI discussed a specific topic
 - Drills into a conversation to show the individual **tasks** (each agent run)
   with a size indicator flagging which ones are likely to contain thinking
 - Extracts and displays the full **thinking blocks** for any selected task,
@@ -70,7 +73,7 @@ python3 warp_thinking_browser.py
 ```
 
 The database is detected automatically. On first launch you will see a list of
-your 50 most recent conversations.
+your 500 most recent conversations.
 
 ### Override the database path
 
@@ -93,21 +96,86 @@ python3 warp_thinking_browser.py --help
 
 ### Step 1 — Conversations screen
 
+The conversations screen shows your history with a filter panel at the top.
+
 ```
 ════════════════════════════════════════════════════════════════════════
   WARP THINKING BROWSER  ·  Conversations
 ════════════════════════════════════════════════════════════════════════
 
-  [ 0]  2026-05-08 09:41  refactor the authentication middleware to use…
-  [ 1]  2026-05-08 08:17  why are my Jest tests failing after the webpa…
-  [ 2]  2026-05-07 22:53  write a migration script to backfill the user…
-  [ 3]  2026-05-07 19:30  help me debug the memory leak in the worker p…
+  FILTERS
+  [F] Title filter    : none
+  [T] Thinking search : none
+
+────────────────────────────────────────────────────────────────────────
+
+  [ 0]  2026-05-08 09:41  refactor the authentication middleware to use JWT
+                          bearer tokens and move validation into a dedicated
+                          service class
+  [ 1]  2026-05-08 08:17  why are my Jest tests failing after the webpack
+                          config change?
+  [ 2]  2026-05-07 22:53  write a migration script to backfill the users
+                          table with default preferences
+  [ 3]  2026-05-07 19:30  help me debug the memory leak in the worker pool
   ...
 
-› Select conversation number, or Q to quit  [0-N / Q]:
+› Number to open,  F = title filter,  T = thinking search,  Q = quit
+  [0-N / F / T / C / Q]:
 ```
 
 Type the number next to the conversation you want and press Enter.
+
+### Filtering conversations
+
+With hundreds of conversations in history, the two filters help you zero in
+on the right one quickly.
+
+#### F — Title filter (fast)
+
+Filters the conversation list by any word or phrase from your original
+question. Runs instantly — no blob parsing.
+
+```
+› Title filter (Enter to clear): JWT middleware
+```
+
+The list immediately narrows to only conversations whose opening question
+contains that text.
+
+#### T — Thinking search (slower)
+
+Searches the full thinking text inside every task blob across the filtered
+conversations. Use this when you remember something the AI *reasoned about*
+but not necessarily what you asked.
+
+```
+› Search thinking text (Enter to clear): TokenService
+```
+
+A progress message shows while blobs are being scanned. Only conversations
+where at least one task contains that term in its thinking text are returned.
+
+#### Using both together
+
+The filters stack — title filter runs first (cheap), then thinking search
+operates only on those results. This keeps the thinking search fast even
+against a large history.
+
+#### C — Clear all filters
+
+`C` appears in the prompt once any filter is active. Press it to reset both
+filters and return to the full list.
+
+```
+  FILTERS
+  [F] Title filter    : "JWT middleware"
+  [T] Thinking search : "TokenService"
+  [C] Clear all filters
+
+  [ 0]  2026-05-08 09:41  refactor the authentication middleware...
+
+  1 conversation(s) matched
+```
 
 ### Step 2 — Tasks screen
 
