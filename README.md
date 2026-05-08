@@ -35,7 +35,7 @@ saveable plain text.
 
 ---
 
-## The two tools
+## The three tools
 
 ### `warp_thinking_browser.py`
 
@@ -51,6 +51,15 @@ thinking blocks to timestamped log files as sessions complete. Run it once and
 leave it — every session that produces thinking output gets a log file without
 any manual intervention. Use it when you want a persistent, searchable archive
 of all thinking output across all sessions going forward.
+
+### `read_task.py`
+
+A direct-access script that prints the full **thinking chain and AI response
+text** for a specific task you identify by ID. Unlike the browser, there is no
+navigation — you give it a task ID and it immediately outputs every reasoning
+step alongside the model's visible reply, in execution order. Use it when you
+already know which task you want and need to read both the thinking and the
+response together.
 
 ---
 
@@ -287,6 +296,60 @@ Enable and start:
 systemctl --user enable warp-thinking-logger
 systemctl --user start warp-thinking-logger
 ```
+
+---
+
+## read_task.py — Usage
+
+```bash
+python3 read_task.py <task_id>                          # print thinking + response
+python3 read_task.py <task_id> --save                   # also save to a .txt file
+python3 read_task.py <task_id> --db /path/to/warp.sqlite
+python3 read_task.py --list                             # show 20 most recent tasks
+```
+
+### Finding a task ID
+
+Task IDs are UUIDs. The easiest ways to find one:
+
+- Run `python3 read_task.py --list` to see the 20 most recent tasks with their IDs.
+- Use `warp_thinking_browser.py` to browse conversations and identify the task
+  you want — the task ID is shown in the thinking view header.
+
+### What it shows
+
+For each step in the task that has content, the script prints the thinking
+block first, then the response, so you can read the full reasoning → conclusion
+flow for every step in sequence.
+
+```
+════════════════════════════════════════════════════════════════════════════════
+TASK:         Refactor Auth Middleware
+CONVERSATION: refactor the authentication middleware to use JWT bearer tokens
+TASK ID:      3c82f1a0-11e4-4b9d-8c77-d04a692f3e51
+DATE:         2026-05-08 09:41:03
+SIZE:         287.4 KB
+════════════════════════════════════════════════════════════════════════════════
+
+4 step(s) with content  ·  4 thinking block(s)  ·  3 response block(s)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1  ·  3c82f1a0-11e4-4b9d-8c77-d04a692f3e51
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ▸ THINKING
+────────────────────────────────────────────────────────────────────────────────
+The user wants to refactor the JWT validation logic out of the Express
+middleware and into a dedicated service class. Let me read the current
+middleware file first to understand what's there before making any changes.
+
+  ▸ RESPONSE
+────────────────────────────────────────────────────────────────────────────────
+I'll read the current middleware file to understand its structure.
+```
+
+Press **S** (or use `--save`) to write the full output to a `.txt` file named
+`task_YYYYMMDD_<task_title_slug>.txt` in the current directory.
 
 ---
 
