@@ -21,6 +21,7 @@ Default database locations:
 """
 
 import argparse
+import json
 import os
 import platform
 import sqlite3
@@ -217,10 +218,27 @@ def load_conversations(limit=500):
     con.close()
     result = []
     for cid, ts, fq in rows:
-        title = (fq or "").strip().replace("\n", " ")
-        title = title or "(no queries)"
+        title = _extract_query_text(fq)
         result.append({"id": cid, "ts": ts, "title": title})
     return result
+
+
+def _extract_query_text(raw):
+    """Extract the plain question text from ai_queries.input (a JSON blob)."""
+    if not raw:
+        return "(no queries)"
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict) and "Query" in item:
+                    text = item["Query"].get("text", "")
+                    if text:
+                        return text.strip().replace("\n", " ")
+    except (json.JSONDecodeError, TypeError, KeyError):
+        pass
+    # Fallback: return the raw string if it isn't JSON
+    return raw.strip().replace("\n", " ") or "(no queries)"
 
 
 def load_tasks(conversation_id):
