@@ -37,14 +37,14 @@ saveable plain text.
 
 ## The three tools
 
-### `warp_thinking_browser.py`
+### `warp_thinking_browse.py`
 
 An interactive terminal browser for your Warp conversation history. Navigate
 conversations, select tasks, and read or save the full thinking text for any
 session. Use it when you want to go back and examine the reasoning from a
 specific past session.
 
-### `warp_thinking_logger.py`
+### `warp_thinking_watch.py`
 
 A background daemon that watches the Warp database and automatically exports
 thinking blocks to timestamped log files as sessions complete. Run it once and
@@ -52,7 +52,7 @@ leave it — every session that produces thinking output gets a log file without
 any manual intervention. Use it when you want a persistent, searchable archive
 of all thinking output across all sessions going forward.
 
-### `read_task.py`
+### `warp_thinking_read.py`
 
 A direct-access script that prints the full **thinking chain and AI response
 text** for a specific task you identify by ID. Unlike the browser, there is no
@@ -113,11 +113,11 @@ to specify the path manually.
 
 ---
 
-## warp_thinking_browser.py — Usage
+## warp_thinking_browse.py — Usage
 
 ```bash
-python3 warp_thinking_browser.py                       # auto-detect database
-python3 warp_thinking_browser.py --db /path/to/warp.sqlite
+python3 warp_thinking_browse.py                        # auto-detect database
+python3 warp_thinking_browse.py --db /path/to/warp.sqlite
 ```
 
 ### Conversations screen
@@ -177,20 +177,20 @@ output to a `.txt` file.
 
 ---
 
-## warp_thinking_logger.py — Usage
+## warp_thinking_watch.py — Usage
 
 ```bash
-python3 warp_thinking_logger.py                         # log to ./warp_thinking_logs/
-python3 warp_thinking_logger.py --out ~/research/logs   # custom output directory
-python3 warp_thinking_logger.py --db /path/to/warp.sqlite --out ~/logs
-python3 warp_thinking_logger.py --interval 30           # poll every 30 seconds (default: 10)
-python3 warp_thinking_logger.py --quiet                 # suppress console output
+python3 warp_thinking_watch.py                          # log to ./warp_thinking_logs/
+python3 warp_thinking_watch.py --out ~/research/logs    # custom output directory
+python3 warp_thinking_watch.py --db /path/to/warp.sqlite --out ~/logs
+python3 warp_thinking_watch.py --interval 30            # poll every 30 seconds (default: 10)
+python3 warp_thinking_watch.py --quiet                  # suppress console output
 ```
 
 Run in the background:
 
 ```bash
-nohup python3 warp_thinking_logger.py --out ~/warp_thinking_logs &
+nohup python3 warp_thinking_watch.py --out ~/warp_thinking_logs &
 ```
 
 ### What it does
@@ -243,7 +243,7 @@ To have the logger start automatically at login, create
   <key>ProgramArguments</key>
   <array>
     <string>/usr/bin/python3</string>
-    <string>/path/to/warp_thinking_logger.py</string>
+    <string>/path/to/warp_thinking_watch.py</string>
     <string>--out</string>
     <string>/Users/YOUR_USERNAME/warp_thinking_logs</string>
     <string>--quiet</string>
@@ -272,7 +272,7 @@ launchctl unload ~/Library/LaunchAgents/com.github.warp-thinking-logger.plist
 
 ### Running as a systemd service (Linux)
 
-Create `~/.config/systemd/user/warp-thinking-logger.service`:
+Create `~/.config/systemd/user/warp-thinking-watch.service`:
 
 ```ini
 [Unit]
@@ -280,7 +280,7 @@ Description=Warp Thinking Logger
 After=default.target
 
 [Service]
-ExecStart=/usr/bin/python3 /path/to/warp_thinking_logger.py \
+ExecStart=/usr/bin/python3 /path/to/warp_thinking_watch.py \\
   --out /home/YOUR_USERNAME/warp_thinking_logs \
   --quiet
 Restart=on-failure
@@ -293,27 +293,27 @@ WantedBy=default.target
 Enable and start:
 
 ```bash
-systemctl --user enable warp-thinking-logger
-systemctl --user start warp-thinking-logger
+systemctl --user enable warp-thinking-watch
+systemctl --user start warp-thinking-watch
 ```
 
 ---
 
-## read_task.py — Usage
+## warp_thinking_read.py — Usage
 
 ```bash
-python3 read_task.py <task_id>                          # print thinking + response
-python3 read_task.py <task_id> --save                   # also save to a .txt file
-python3 read_task.py <task_id> --db /path/to/warp.sqlite
-python3 read_task.py --list                             # show 20 most recent tasks
+python3 warp_thinking_read.py <task_id>                 # print thinking + response
+python3 warp_thinking_read.py <task_id> --save          # also save to a .txt file
+python3 warp_thinking_read.py <task_id> --db /path/to/warp.sqlite
+python3 warp_thinking_read.py --list                    # show 20 most recent tasks
 ```
 
 ### Finding a task ID
 
 Task IDs are UUIDs. The easiest ways to find one:
 
-- Run `python3 read_task.py --list` to see the 20 most recent tasks with their IDs.
-- Use `warp_thinking_browser.py` to browse conversations and identify the task
+- Run `python3 warp_thinking_read.py --list` to see the 20 most recent tasks with their IDs.
+- Use `warp_thinking_browse.py` to browse conversations and identify the task
   you want — the task ID is shown in the thinking view header.
 
 ### What it shows
@@ -403,6 +403,62 @@ could change the binary layout, which would require updating the field numbers
 in `parse_fields()`. Both tools will report `· no thinking` / silently skip
 rather than crash if the schema changes, but results would be empty. Check
 after any significant Warp version update if output stops appearing.
+
+---
+
+## Testing
+
+The project includes a parity test suite that verifies the shared functions
+(protobuf parser, DB path detection, query text extraction) produce identical
+results across all three scripts.
+
+```bash
+# First time: capture a sample task blob as a test fixture
+python3 tests/capture_fixture.py --with-thinking
+
+# Run the tests
+pytest tests/
+```
+
+### What the tests cover
+
+**Synthetic tests** (always run, no database needed):
+- `read_varint` / `parse_fields` produce identical results across all three scripts
+- `decode_string` handles valid UTF-8 and invalid bytes identically
+- `task_title_from_blob` returns the same title (or `"(untitled)"`) in all scripts
+- `default_db_path` returns the same path in all scripts
+- `_extract_query_text` parses JSON query structures and plain strings identically
+- `blob_has_thinking` / `extract_thinking` agree between browse and watch
+
+**Fixture tests** (require `tests/fixtures/sample_task.bin`):
+- Run the same shared functions against a real Warp task blob captured from
+  your database, verifying parity on production data rather than just edge cases
+
+### What fixture tests are for
+
+A fixture test uses a saved snapshot of real data — a binary task blob from the
+Warp database — as a known-good input. The tests run the parser functions
+against that snapshot and check the results. This serves two purposes:
+
+1. **Schema canary.** If a Warp update changes the protobuf layout, the parser
+   will produce different or empty results against the same snapshot. The test
+   fails, and you know the schema changed before you discover it by accident.
+
+2. **Regression anchor.** If you refactor the parser, the fixture test confirms
+   the output hasn't changed for real-world data, not just the synthetic edge
+   cases that the other tests cover.
+
+Without the fixture file, pytest skips these tests rather than failing. To
+create the fixture, run `capture_fixture.py` once — it reads the most recent
+(or largest) task blob from your Warp database and saves it to
+`tests/fixtures/sample_task.bin`. Re-capture after significant Warp updates
+to keep the fixture current.
+
+### When to run tests
+
+- After editing any shared function (the `(shared)` sections in any script)
+- After a Warp version update, to check for schema changes
+- Before committing
 
 ---
 

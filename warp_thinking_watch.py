@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-warp_thinking_logger.py
-───────────────────────
+warp_thinking_watch.py
+──────────────────────
 Background daemon that watches the Warp SQLite database for new or updated
 agent tasks and automatically exports any thinking blocks to timestamped log
 files — one file per task, written as soon as the task is detected.
@@ -9,14 +9,22 @@ files — one file per task, written as soon as the task is detected.
 No guesswork. Uses the same definitive field-15 protobuf probe as the browser
 tool. Only tasks that actually contain thinking text produce a log file.
 
+Sections:
+    Protobuf (shared)   — wire-format parser, keep in sync across scripts
+    DB shared           — default_db_path, _extract_query_text
+    DB watch-specific   — get_recent_tasks
+    File output         — log file writing
+    Watch loop          — polling daemon
+    Entry point         — main()
+
 Usage:
-    python3 warp_thinking_logger.py                        # log to ./warp_thinking_logs/
-    python3 warp_thinking_logger.py --out ~/research/logs  # custom output directory
-    python3 warp_thinking_logger.py --db /path/to/warp.sqlite --out ~/logs
-    python3 warp_thinking_logger.py --help
+    python3 warp_thinking_watch.py                         # log to ./warp_thinking_logs/
+    python3 warp_thinking_watch.py --out ~/research/logs   # custom output directory
+    python3 warp_thinking_watch.py --db /path/to/warp.sqlite --out ~/logs
+    python3 warp_thinking_watch.py --help
 
 Run as a background process:
-    nohup python3 warp_thinking_logger.py --out ~/warp_thinking_logs &
+    nohup python3 warp_thinking_watch.py --out ~/warp_thinking_logs &
 
 Or install as a launchd service on macOS — see README for plist.
 
@@ -43,9 +51,7 @@ import textwrap
 import time
 from datetime import datetime
 
-# ── Shared protobuf parser ────────────────────────────────────────────────────
-# Identical to warp_thinking_browser.py — kept self-contained so this script
-# runs independently with no imports between the two files.
+# ── Protobuf parser (shared — keep in sync across all three scripts) ──────────
 
 def read_varint(data, pos):
     result, shift = 0, 0
@@ -82,13 +88,19 @@ def parse_fields(data):
             break
     return fields
 
+def decode_string(data):
+    """Return decoded UTF-8 string or None."""
+    try:
+        return data.decode("utf-8")
+    except Exception:
+        return None
+
 def task_title_from_blob(blob):
     for fn, wt, val in parse_fields(bytes(blob)):
         if fn == 2 and wt == 2:
-            try:
-                return val.decode("utf-8")
-            except Exception:
-                pass
+            text = decode_string(val)
+            if text:
+                return text
     return "(untitled)"
 
 def blob_has_thinking(blob):
@@ -104,12 +116,8 @@ def blob_has_thinking(blob):
             if sfn != 15 or swt != 2:
                 continue
             for _, twt, tval in parse_fields(sval):
-                if twt == 2 and len(tval) > 10:
-                    try:
-                        tval.decode("utf-8")
-                        return True
-                    except Exception:
-                        pass
+                if twt == 2 and len(tval) > 10 and decode_string(tval) is not None:
+                    return True
     return False
 
 def extract_thinking(blob):
@@ -121,24 +129,18 @@ def extract_thinking(blob):
         step_id, chunks = None, []
         for sfn, swt, sval in parse_fields(val):
             if sfn == 1 and swt == 2:
-                try:
-                    step_id = sval.decode("utf-8")
-                except Exception:
-                    pass
+                step_id = decode_string(sval)
             elif sfn == 15 and swt == 2:
                 for _, twt, tval in parse_fields(sval):
                     if twt == 2:
-                        try:
-                            text = tval.decode("utf-8")
-                            if len(text) > 10:
-                                chunks.append(text)
-                        except Exception:
-                            pass
+                        text = decode_string(tval)
+                        if text and len(text) > 10:
+                            chunks.append(text)
         if chunks:
             blocks.append({"step_id": step_id, "thinking": "\n".join(chunks)})
     return blocks
 
-# ── Database helpers ──────────────────────────────────────────────────────────
+# ── DB helpers (shared — keep in sync across all three scripts) ──────────────
 
 def default_db_path():
     system = platform.system()
@@ -154,6 +156,8 @@ def default_db_path():
         local = os.environ.get("LOCALAPPDATA", "")
         return os.path.join(local, "warp", "Warp", "data", "warp.sqlite")
     return None
+
+# ── DB helpers (watch-specific) ───────────────────────────────────────────────
 
 def get_recent_tasks(db_path, limit=2000):
     """
@@ -213,7 +217,7 @@ def _extract_query_text(raw):
         pass
     return raw.strip().replace("\n", " ") or "(no queries)"
 
-# ── File output ───────────────────────────────────────────────────────────────
+# ── File output (watch-specific) ───────────────────────────────────────────────
 
 def slugify(text, max_len=50):
     safe = "".join(ch if ch.isalnum() or ch in " _-" else "_" for ch in text)
@@ -264,7 +268,7 @@ def write_thinking_log(task, blocks, out_dir):
 
     return filepath
 
-# ── Logger main loop ──────────────────────────────────────────────────────────
+# ── Watch loop (watch-specific) ────────────────────────────────────────────────
 
 def run_logger(db_path, out_dir, poll_interval=10, verbose=True):
     os.makedirs(out_dir, exist_ok=True)
@@ -349,7 +353,7 @@ def run_logger(db_path, out_dir, poll_interval=10, verbose=True):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="warp_thinking_logger.py",
+        prog="warp_thinking_watch.py",
         description="Auto-export Warp agent thinking blocks to log files as sessions complete.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__

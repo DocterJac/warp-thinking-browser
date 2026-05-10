@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-read_task.py
-────────────
+warp_thinking_read.py
+──────────────────────
 Extract and display the full thinking chain and AI response text for a
 specific Warp agent task, identified by task_id.
 
@@ -9,11 +9,19 @@ For each step in the task, prints the thinking block first (if present)
 followed by the response text (if present), so you can read the full
 reasoning → response flow in sequence.
 
+Sections:
+    Protobuf (shared)   — wire-format parser, keep in sync across scripts
+    DB shared           — default_db_path, _extract_query_text
+    DB read-specific    — fetch_task, list_recent_tasks
+    Extraction          — extract_steps (thinking + response)
+    Formatting          — output rendering
+    Entry point         — main()
+
 Usage:
-    python3 read_task.py <task_id>
-    python3 read_task.py <task_id> --db /path/to/warp.sqlite
-    python3 read_task.py --list              # show 20 most recent tasks
-    python3 read_task.py <task_id> --save    # save output to a .txt file
+    python3 warp_thinking_read.py <task_id>
+    python3 warp_thinking_read.py <task_id> --db /path/to/warp.sqlite
+    python3 warp_thinking_read.py --list              # show 20 most recent tasks
+    python3 warp_thinking_read.py <task_id> --save    # save output to a .txt file
 
 Requirements: Python 3.7+, no third-party packages.
 """
@@ -27,25 +35,7 @@ import sys
 import textwrap
 
 
-# ── DB path ───────────────────────────────────────────────────────────────────
-
-def default_db_path():
-    system = platform.system()
-    if system == "Darwin":
-        return os.path.expanduser(
-            "~/Library/Group Containers/2BBY89MBSN.dev.warp"
-            "/Library/Application Support/dev.warp.Warp-Stable/warp.sqlite"
-        )
-    elif system == "Linux":
-        xdg = os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
-        return os.path.join(xdg, "warp-terminal", "warp.sqlite")
-    elif system == "Windows":
-        local = os.environ.get("LOCALAPPDATA", "")
-        return os.path.join(local, "warp", "Warp", "data", "warp.sqlite")
-    return None
-
-
-# ── Protobuf parser ───────────────────────────────────────────────────────────
+# ── Protobuf parser (shared — keep in sync across all three scripts) ──────────
 
 def read_varint(data, pos):
     result, shift = 0, 0
@@ -91,8 +81,47 @@ def decode_string(data):
     except Exception:
         return None
 
+def task_title_from_blob(blob):
+    for fn, wt, val in parse_fields(bytes(blob)):
+        if fn == 2 and wt == 2:
+            text = decode_string(val)
+            if text:
+                return text
+    return "(untitled)"
 
-# ── Extraction ────────────────────────────────────────────────────────────────
+# ── DB helpers (shared — keep in sync across all three scripts) ──────────────
+
+def default_db_path():
+    system = platform.system()
+    if system == "Darwin":
+        return os.path.expanduser(
+            "~/Library/Group Containers/2BBY89MBSN.dev.warp"
+            "/Library/Application Support/dev.warp.Warp-Stable/warp.sqlite"
+        )
+    elif system == "Linux":
+        xdg = os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
+        return os.path.join(xdg, "warp-terminal", "warp.sqlite")
+    elif system == "Windows":
+        local = os.environ.get("LOCALAPPDATA", "")
+        return os.path.join(local, "warp", "Warp", "data", "warp.sqlite")
+    return None
+
+def _extract_query_text(raw):
+    if not raw:
+        return "(no queries)"
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict) and "Query" in item:
+                    text = item["Query"].get("text", "")
+                    if text:
+                        return text.strip().replace("\n", " ")
+    except (json.JSONDecodeError, TypeError, KeyError):
+        pass
+    return raw.strip().replace("\n", " ") or "(no queries)"
+
+# ── Extraction (read-specific) ───────────────────────────────────────────────
 
 def extract_steps(blob):
     """
@@ -148,7 +177,7 @@ def extract_steps(blob):
     return steps
 
 
-# ── Database helpers ──────────────────────────────────────────────────────────
+# ── DB helpers (read-specific) ───────────────────────────────────────────────
 
 def fetch_task(db_path, task_id):
     """Return (task_row_dict, conv_title) or raise if not found."""
@@ -166,15 +195,6 @@ def fetch_task(db_path, task_id):
 
     tid, cid, ts, size, blob = row
 
-    # Get task title from blob field 2
-    task_title = "(untitled)"
-    for fn, wt, val in parse_fields(bytes(blob)):
-        if fn == 2 and wt == 2:
-            t = decode_string(val)
-            if t:
-                task_title = t
-            break
-
     # Get conversation title from ai_queries
     fq_row = con.execute(
         "SELECT input FROM ai_queries WHERE conversation_id = ? "
@@ -183,24 +203,11 @@ def fetch_task(db_path, task_id):
     ).fetchone()
     con.close()
 
-    conv_title = "(no queries)"
-    if fq_row:
-        raw = fq_row[0]
-        try:
-            data = json.loads(raw)
-            if isinstance(data, list):
-                for item in data:
-                    if isinstance(item, dict) and "Query" in item:
-                        t = item["Query"].get("text", "")
-                        if t:
-                            conv_title = t.strip().replace("\n", " ")
-                            break
-        except Exception:
-            conv_title = (raw or "").strip().replace("\n", " ")[:120]
+    conv_title = _extract_query_text(fq_row[0] if fq_row else None)
 
     return {
         "task_id":   tid,
-        "task_title": task_title,
+        "task_title": task_title_from_blob(blob),
         "conv_title": conv_title,
         "ts":        ts,
         "size_kb":   size / 1024,
@@ -221,37 +228,17 @@ def list_recent_tasks(db_path, n=20):
 
     result = []
     for tid, cid, ts, size, blob, fq in rows:
-        task_title = "(untitled)"
-        for fn, wt, val in parse_fields(bytes(blob)):
-            if fn == 2 and wt == 2:
-                t = decode_string(val)
-                if t:
-                    task_title = t
-                break
-        conv_title = "(no queries)"
-        if fq:
-            try:
-                data = json.loads(fq)
-                if isinstance(data, list):
-                    for item in data:
-                        if isinstance(item, dict) and "Query" in item:
-                            t = item["Query"].get("text", "")
-                            if t:
-                                conv_title = t.strip().replace("\n", " ")
-                                break
-            except Exception:
-                conv_title = (fq or "").strip().replace("\n", " ")[:80]
         result.append({
             "task_id":    tid,
-            "task_title": task_title,
-            "conv_title": conv_title,
+            "task_title": task_title_from_blob(blob),
+            "conv_title": _extract_query_text(fq),
             "ts":         ts,
             "size_kb":    size / 1024,
         })
     return result
 
 
-# ── Formatting ────────────────────────────────────────────────────────────────
+# ── Formatting (read-specific) ────────────────────────────────────────────────
 
 WRAP_WIDTH = 80
 
@@ -315,7 +302,7 @@ def format_output(task, steps):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="read_task.py",
+        prog="warp_thinking_read.py",
         description="Print thinking chain and response text for a Warp agent task.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
