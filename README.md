@@ -65,8 +65,8 @@ response together.
 
 ## How thinking detection works
 
-Both tools use a **definitive protobuf field probe** rather than a size
-heuristic. The Warp database stores task data as Protocol Buffers binary blobs.
+All three tools use a **definitive protobuf field probe** rather than a
+size heuristic. The Warp database stores task data as Protocol Buffers binary blobs.
 Within each blob, thinking text lives at field 15 of each step message. The
 tools walk the protobuf structure and confirm that field 15 content with
 readable UTF-8 text actually exists before reporting a task as containing
@@ -74,8 +74,8 @@ thinking. A task either has thinking or it does not — there is no "thinking
 likely" guess.
 
 The browser displays `✦ thinking confirmed` or `· no thinking` next to each
-task. The logger silently skips tasks with no thinking and writes a log file
-for tasks that do.
+task. The watch daemon silently skips tasks with no thinking and writes a log
+file for tasks that do.
 
 ---
 
@@ -89,14 +89,13 @@ for tasks that do.
 
 ## Installation
 
-No installation required. Download both script files and place them anywhere:
+No installation required. Clone the repository or download the scripts individually:
 
 ```bash
 git clone https://github.com/DocterJac/warp-thinking-browser.git
 cd warp-thinking-browser
 ```
 
-Or download the scripts individually.
 
 ---
 
@@ -280,7 +279,7 @@ Description=Warp Thinking Logger
 After=default.target
 
 [Service]
-ExecStart=/usr/bin/python3 /path/to/warp_thinking_watch.py \\
+ExecStart=/usr/bin/python3 /path/to/warp_thinking_watch.py \
   --out /home/YOUR_USERNAME/warp_thinking_logs \
   --quiet
 Restart=on-failure
@@ -348,7 +347,7 @@ middleware file first to understand what's there before making any changes.
 I'll read the current middleware file to understand its structure.
 ```
 
-Press **S** (or use `--save`) to write the full output to a `.txt` file named
+Use `--save` to write the full output to a `.txt` file named
 `task_YYYYMMDD_<task_title_slug>.txt` in the current directory.
 
 ---
@@ -400,7 +399,7 @@ corrupt Warp's data.
 The protobuf field numbers used by these tools were determined by inspection
 of the binary blobs. They are not documented by Warp. A future Warp update
 could change the binary layout, which would require updating the field numbers
-in `parse_fields()`. Both tools will report `· no thinking` / silently skip
+in `parse_fields()`. The tools will report `· no thinking` / silently skip
 rather than crash if the schema changes, but results would be empty. Check
 after any significant Warp version update if output stops appearing.
 
@@ -464,17 +463,17 @@ to keep the fixture current.
 
 ## Limitations
 
-- **Retroactive coverage.** The logger only captures sessions going forward
-  from when it was started. For sessions before that, use the browser tool.
-  The browser tool can search all stored history.
+- **Retroactive coverage.** The watch daemon only captures sessions going
+  forward from when it was started. For sessions before that, use the browser
+  or read tool. Both can access all stored history.
 
 - **Local database only.** Tasks that ran on a different machine are not in
   your local database unless you have accessed those conversations in Warp
   (which triggers a sync).
 
 - **No thinking = no output.** Simple or short agent responses may not trigger
-  extended reasoning. Both tools report this clearly rather than silently
-  returning nothing.
+  extended reasoning. All three tools report this clearly rather than
+  silently returning nothing.
 
 - **Undocumented schema.** See Technical notes above.
 
